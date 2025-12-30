@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>2026 璀璨流光·旗舰版</title>
+    <title>2026 璀璨流光·永恒版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; cursor: crosshair; }
         
@@ -11,7 +11,6 @@
             text-align: center; z-index: 100;
         }
 
-        /* 按钮样式升级：更明显的点击反馈 */
         button {
             pointer-events: auto;
             padding: 15px 60px; font-size: 22px; color: #fff; background: rgba(0,0,0,0.5);
@@ -25,74 +24,59 @@
             background: #ffaa00; color: #000; 
             box-shadow: 0 0 60px #ffaa00; transform: scale(1.05);
         }
-        button:active {
-            transform: scale(0.95); background: #fff;
-        }
-        /* 禁用状态 */
         button:disabled {
             border-color: #555; color: #888; box-shadow: none; cursor: not-allowed;
         }
 
-        /* 状态文字 */
-        #status {
-            margin-top: 15px; font-size: 14px; color: #888; font-family: monospace;
-        }
-
+        #status { margin-top: 15px; font-size: 14px; color: #666; font-family: monospace; }
+        
         #tip {
             position: absolute; bottom: 50px; width: 100%; text-align: center;
             color: rgba(255, 255, 255, 0.5); font-family: sans-serif; font-size: 14px; 
-            letter-spacing: 2px; pointer-events: none;
-            opacity: 0; transition: opacity 2s;
-            text-shadow: 0 0 10px #fff;
+            letter-spacing: 2px; pointer-events: none; opacity: 0; transition: opacity 2s;
         }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <button id="start-btn" disabled>正在连接引擎...</button>
-        <div id="status">系统初始化中...</div>
+        <button id="start-btn">开启 2026</button>
+        <div id="status">正在加载本地资源...</div>
     </div>
     <div id="tip">探索光点 · 寻找回忆</div>
 
-    <!-- 换回最稳的 Staticfile 源 -->
-    <script src="https://cdn.staticfile.org/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.staticfile.org/tween.js/18.6.4/tween.umd.js"></script>
+    <!-- ★★★ 关键修改：直接引用同目录下的文件，不再联网下载 ★★★ -->
+    <script src="three.min.js"></script>
+    <script src="tween.umd.js"></script>
 
     <script>
-        // --- 1. 引擎自检系统 ---
         const startBtn = document.getElementById('start-btn');
         const statusDiv = document.getElementById('status');
-        let engineReady = false;
 
+        // 引擎自检
         window.onload = function() {
-            // 检查 Three.js 是否加载
             if (typeof THREE === 'undefined' || typeof TWEEN === 'undefined') {
-                statusDiv.innerHTML = "❌ 网络错误：3D引擎加载失败。<br>请刷新页面或检查网络！";
+                statusDiv.innerHTML = "❌ 错误：没找到 three.min.js 或 tween.umd.js 文件。<br>请确认已将它们上传到 GitHub 仓库！";
                 statusDiv.style.color = "red";
-                startBtn.innerText = "资源丢失";
-                startBtn.style.borderColor = "red";
+                startBtn.disabled = true;
+                startBtn.innerText = "缺失文件";
+                startBtn.style.borderColor = "#333";
             } else {
-                engineReady = true;
-                startBtn.removeAttribute('disabled');
-                startBtn.innerText = "开启 2026";
-                statusDiv.innerHTML = "✅ 系统就绪，点击开启";
+                statusDiv.innerHTML = "✅ 本地引擎就绪";
                 statusDiv.style.color = "#00ff00";
-                
-                // 初始化配置
+                startBtn.innerText = "开启 2026";
+                startBtn.disabled = false;
                 initSystem();
             }
         };
 
-        // --- ⚙️ 核心配置 ---
         const CONFIG = {
             text: "张钰宸\n2026要一直快乐", 
-            particleCount: 30000,    // 粒子数量
-            baseSize: 8.0,           // 【增强】粒子更大了
-            bloomStrength: 2.0,      // 【增强】发光强度翻倍
-            colors: [0xffaa00, 0xffd700, 0xff4500, 0xffffff, 0xff00ff], // 金、橙、红、白、紫
+            particleCount: 30000,
+            baseSize: 8.0,
+            colors: [0xffaa00, 0xffd700, 0xff4500, 0xffffff, 0xff00ff], 
             photoCount: 20,
-            photoPath: 'photos/',
+            photoPath: 'photos/', // 必须叫 photos 文件夹
             photoExt: '.jpg'
         };
 
@@ -106,6 +90,166 @@
 
         function initSystem() {
             glowTexture = createGlowTexture();
-            
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(0x000000, 0.0005);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 10000);
+            camera.position.z = 1000;
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            loadPhotos();
+            createBackgroundStars();
+
+            window.addEventListener('resize', () => {
+                camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            startBtn.onclick = startSequence; 
+            document.addEventListener('click', onClick);
+            document.addEventListener('mousemove', onMouseMove);
+            animate();
+        }
+
+        function createGlowTexture() {
+            const c = document.createElement('canvas'); c.width=128; c.height=128;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            g.addColorStop(0, 'rgba(255, 255, 255, 1)'); g.addColorStop(0.3, 'rgba(255, 220, 100, 0.6)'); g.addColorStop(0.5, 'rgba(255, 100, 0, 0.2)'); g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
+            return new THREE.CanvasTexture(c);
+        }
+
+        function loadPhotos() {
+            const loader = new THREE.TextureLoader();
+            for(let i=1; i<=CONFIG.photoCount; i++) {
+                loader.load(CONFIG.photoPath + i + CONFIG.photoExt, (tex)=>{ photos.push(tex); }, undefined, ()=>{ photos.push(createGlowTexture()); });
+            }
+        }
+
+        function createBackgroundStars() {
+            const geo = new THREE.BufferGeometry();
+            const pos=[], col=[], siz=[]; const ch = new THREE.Color();
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const r = Math.random() * 2500, theta = Math.random() * Math.PI * 2, phi = Math.acos(2 * Math.random() - 1);
+                pos.push(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi));
+                ch.setHex(CONFIG.colors[Math.floor(Math.random()*CONFIG.colors.length)]);
+                col.push(ch.r, ch.g, ch.b);
+                siz.push(CONFIG.baseSize * (Math.random() * 2.0 + 0.5));
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('customColor', new THREE.Float32BufferAttribute(col, 3));
+            geo.setAttribute('size', new THREE.Float32BufferAttribute(siz, 1));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { pointTexture: { value: glowTexture }, time: { value: 0 } },
+                vertexShader: `attribute float size; attribute vec3 customColor; varying vec3 vColor; uniform float time; void main() { vColor = customColor; vec3 p = position; float f = 1.0 + sin(time * 3.0 + p.x * 0.01) * 0.5; vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_PointSize = size * f * (600.0 / -mv.z); gl_Position = projectionMatrix * mv; }`,
+                fragmentShader: `uniform sampler2D pointTexture; varying vec3 vColor; void main() { vec4 tc = texture2D(pointTexture, gl_PointCoord); gl_FragColor = vec4(vColor * 3.0, 1.0) * tc; if (gl_FragColor.a < 0.05) discard; }`,
+                blending: THREE.AdditiveBlending, depthTest: false, transparent: true
+            });
+            particles = new THREE.Points(geo, mat);
+            scene.add(particles);
+        }
+
+        function getShapePoints(text, size) {
+            const c = document.createElement('canvas'); const w=1024, h=1024; c.width=w; c.height=h;
+            const ctx = c.getContext('2d'); ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
+            ctx.fillStyle='#fff'; ctx.font=`bold ${size}px "Microsoft YaHei"`; ctx.textAlign='center'; ctx.textBaseline='middle';
+            const lines = text.toString().split('\n'); const lh = size*1.2;
+            lines.forEach((l, i) => { ctx.fillText(l, w/2, h/2 - ((lines.length-1)*lh)/2 + i*lh); });
+            const d = ctx.getImageData(0,0,w,h).data, pts=[];
+            for(let y=0; y<h; y+=6) { for(let x=0; x<w; x+=6) { if(d[(y*w+x)*4]>128) pts.push({x:(x-w/2)*3.5, y:-(y-h/2)*3.5, z:0}); } }
+            return pts;
+        }
+
+        function transformParticles(pts, dur) {
+            const pos = particles.geometry.attributes.position.array;
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                let tx, ty, tz;
+                if(i < pts.length) { tx=pts[i].x; ty=pts[i].y; tz=pts[i].z; }
+                else { const a=Math.random()*Math.PI*2, r=1000+Math.random()*1500; tx=Math.cos(a)*r; ty=Math.sin(a)*r; tz=(Math.random()-0.5)*800; }
+                tx+=(Math.random()-0.5)*15; ty+=(Math.random()-0.5)*15;
+                new TWEEN.Tween({x:pos[i*3], y:pos[i*3+1], z:pos[i*3+2]}).to({x:tx, y:ty, z:tz}, dur).easing(TWEEN.Easing.Exponential.InOut).onUpdate((o)=>{ pos[i*3]=o.x; pos[i*3+1]=o.y; pos[i*3+2]=o.z; }).start();
+            }
+        }
+
+        function startSequence() {
+            document.getElementById('ui').style.display = 'none';
+            new TWEEN.Tween(camera.position).to({z: 2000}, 2000).start();
+            countdown(5);
+        }
+        function countdown(n) { if(n<1) { showText(); return; } transformParticles(getShapePoints(n, 450), 800); setTimeout(()=>countdown(n-1), 1000); }
+        function showText() { transformParticles(getShapePoints(CONFIG.text, 160), 1500); setTimeout(explodeToOrbs, 3500); }
+        
+        function explodeToOrbs() {
+            const pos = particles.geometry.attributes.position.array;
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const r=2000+Math.random()*3000, t=Math.random()*Math.PI*2, p=Math.acos(2*Math.random()-1);
+                new TWEEN.Tween({x:pos[i*3], y:pos[i*3+1], z:pos[i*3+2]}).to({x:r*Math.sin(p)*Math.cos(t), y:r*Math.sin(p)*Math.sin(t), z:r*Math.cos(p)}, 2500).easing(TWEEN.Easing.Exponential.Out).onUpdate((o)=>{ pos[i*3]=o.x; pos[i*3+1]=o.y; pos[i*3+2]=o.z; }).start();
+            }
+            setTimeout(() => { createMysteriousOrbs(); state='orbs'; document.getElementById('tip').style.opacity=1; }, 600);
+        }
+
+        function createMysteriousOrbs() {
+            scene.add(photoGroup);
+            photos.forEach((tex, i) => {
+                const g = new THREE.Group();
+                const sm = new THREE.SpriteMaterial({ map: glowTexture, color: CONFIG.colors[i%CONFIG.colors.length], transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+                const s = new THREE.Sprite(sm); s.scale.set(120, 120, 1); g.add(s);
+                let w=120, h=120; if(tex.image) h=w/(tex.image.width/tex.image.height);
+                const pm = new THREE.MeshBasicMaterial({ map: tex, side: 2, transparent: true, opacity: 0 });
+                const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), pm); p.visible=false; g.add(p);
+                const t=Math.random()*Math.PI*2, y=(Math.random()-0.5)*1000, r=600+Math.random()*300;
+                g.position.set(r*Math.cos(t), y, r*Math.sin(t)); g.lookAt(camera.position);
+                g.userData = { op: g.position.clone(), z: false, s: s, p: p };
+                new TWEEN.Tween(sm).to({opacity: 1}, 2000).delay(i*100).start();
+                new TWEEN.Tween(s.scale).to({x: 140, y: 140}, 1500+Math.random()*1000).yoyo(true).repeat(Infinity).start();
+                photoGroup.add(g);
+            });
+        }
+
+        let zItem = null;
+        function onClick(e) {
+            if(state !== 'orbs') return;
+            mouse.x=(e.clientX/window.innerWidth)*2-1; mouse.y=-(e.clientY/window.innerHeight)*2+1;
+            raycaster.setFromCamera(mouse, camera);
+            const ints = raycaster.intersectObjects(photoGroup.children, true);
+            if(ints.length > 0) {
+                let tg = ints[0].object.parent;
+                if(tg && tg.parent === photoGroup) {
+                    if(zItem && zItem !== tg) resetZoom(zItem);
+                    if(tg.userData.z) { resetZoom(tg); zItem=null; } else { zoomItem(tg); zItem=tg; }
+                }
+            } else if(zItem) { resetZoom(zItem); zItem=null; }
+        }
+
+        function zoomItem(g) {
+            g.userData.z = true;
+            const t = new THREE.Vector3(); camera.getWorldDirection(t); t.multiplyScalar(500).add(camera.position);
+            new TWEEN.Tween(g.position).to(t, 1000).easing(TWEEN.Easing.Quintic.Out).onUpdate(()=>{ g.lookAt(camera.position); }).start();
+            new TWEEN.Tween(g.userData.s.material).to({opacity: 0}, 300).start();
+            g.userData.p.visible=true;
+            new TWEEN.Tween(g.userData.p.material).to({opacity: 1}, 800).delay(200).start();
+            new TWEEN.Tween(g.userData.p.scale).to({x: 3.0, y: 3.0}, 800).delay(200).start();
+        }
+
+        function resetZoom(g) {
+            g.userData.z = false;
+            new TWEEN.Tween(g.position).to(g.userData.op, 1000).easing(TWEEN.Easing.Quintic.Out).start();
+            new TWEEN.Tween(g.userData.p.material).to({opacity: 0}, 500).onComplete(()=>{ g.userData.p.visible=false; }).start();
+            new TWEEN.Tween(g.userData.p.scale).to({x: 1, y: 1}, 500).start();
+            new TWEEN.Tween(g.userData.s.material).to({opacity: 1}, 800).delay(300).start();
+        }
+
+        let tx=0, ty=0;
+        function onMouseMove(e) { tx=(e.clientX-window.innerWidth/2)*0.0002; ty=(e.clientY-window.innerHeight/2)*0.0002; }
+        function animate() {
+            requestAnimationFrame(animate); TWEEN.update();
+            const t = clock.getElapsedTime();
+            if(particles) particles.material.uniforms.time.value = t;
+            if(state==='orbs' && !zItem) photoGroup.rotation.y+=0.0005;
+            if(scene) { scene.rotation.y+=(tx-scene.rotation.y)*0.05; scene.rotation.x+=(ty-scene.rotation.x)*0.05; }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
