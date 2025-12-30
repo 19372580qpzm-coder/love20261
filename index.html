@@ -3,179 +3,157 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>张钰宸 2026 跨年快乐</title>
+    <title>张钰宸 2026 跨年盛典</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; cursor: pointer; user-select: none; }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Arial', sans-serif; user-select: none; }
         
-        /* UI 层 */
         #ui {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            text-align: center; z-index: 100; pointer-events: none;
+            text-align: center; z-index: 100;
         }
 
-        #start-btn {
+        button {
             pointer-events: auto;
-            padding: 15px 50px; font-size: 24px; color: #fff; background: rgba(0,0,0,0.5);
-            border: 2px solid #ffaa00; border-radius: 50px; cursor: pointer;
-            box-shadow: 0 0 30px rgba(255, 170, 0, 0.5);
-            font-family: 'Microsoft YaHei', sans-serif; font-weight: bold;
-            transition: all 0.3s;
-            text-shadow: 0 0 10px #ffaa00;
+            padding: 15px 40px; font-size: 20px; color: #fff; background: rgba(0,0,0,0.6);
+            border: 2px solid #ffcc00; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 0 20px rgba(255, 204, 0, 0.4);
+            font-weight: bold; letter-spacing: 2px; transition: 0.3s;
         }
-        #start-btn:hover { background: #ffaa00; color: #000; box-shadow: 0 0 60px #ffaa00; transform: scale(1.1); }
-        
+        button:hover { background: #ffcc00; color: #000; box-shadow: 0 0 50px #ffcc00; transform: scale(1.05); }
+
         #tip {
             position: absolute; bottom: 50px; width: 100%; text-align: center;
-            color: rgba(255, 255, 255, 0.6); font-family: sans-serif; font-size: 14px; 
-            letter-spacing: 2px; pointer-events: none; opacity: 0; transition: opacity 1s;
+            color: rgba(255, 255, 255, 0.5); font-size: 14px; pointer-events: none;
+            opacity: 0; transition: opacity 1s; letter-spacing: 1px;
         }
 
-        #status { margin-top: 10px; color: #666; font-size: 12px; }
+        #status { color: #666; font-size: 12px; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div id="ui">
         <button id="start-btn">开启 2026</button>
-        <div id="status">正在加载本地引擎...</div>
+        <div id="status">系统准备中...</div>
     </div>
-    <div id="tip">点击屏幕引爆烟花 · 滑动旋转星空</div>
+    <div id="tip">点击屏幕炸开烟花 · 滑动旋转照片</div>
 
-    <!-- 引用本地引擎 (必须确保这俩文件在同级目录) -->
+    <!-- 引用本地引擎 -->
     <script src="three.min.js"></script>
     <script src="tween.umd.js"></script>
 
     <script>
-        // --- 系统自检 ---
+        // --- 核心配置 (请确保照片在 photos 文件夹) ---
+        const CONFIG = {
+            text: "张钰宸\n2026快乐", 
+            photoCount: 20,          // 照片数量
+            photoPath: 'photos/',    // 文件夹路径
+            photoExt: '.jpg',        // 后缀名
+            particleCount: 15000,    // 粒子数量 (保证文字清晰)
+            particleSize: 6.0,       // 粒子大小
+            colors: [0xffaa00, 0xffd700, 0xff4500, 0xffffff] // 经典暖金配色
+        };
+
         const startBtn = document.getElementById('start-btn');
         const statusDiv = document.getElementById('status');
-        const tipDiv = document.getElementById('tip');
+        let engineReady = false;
 
+        // 自检
         window.onload = function() {
             if (typeof THREE === 'undefined' || typeof TWEEN === 'undefined') {
-                statusDiv.innerHTML = "❌ 错误：缺少 three.min.js 或 tween.umd.js";
+                statusDiv.innerText = "❌ 缺少 three.min.js 或 tween.umd.js";
                 statusDiv.style.color = "red";
-                startBtn.style.borderColor = "#333";
-                startBtn.style.color = "#555";
             } else {
-                statusDiv.innerHTML = "✅ 系统就绪";
+                statusDiv.innerText = "✅ 就绪";
                 statusDiv.style.color = "#00ff00";
-                // 绑定点击事件
-                startBtn.onclick = startSequence;
                 init();
             }
         };
 
-        // --- 配置 ---
-        const CONFIG = {
-            text: "张钰宸\n2026跨年快乐", 
-            particleCount: 32000,    // 粒子总数
-            particleSize: 8.0,       // 粒子大小
-            colors: [0xffd700, 0xff4500, 0xffffff, 0x00ffff, 0xff00ff], // 五彩流光
-            duration: 800            // 变形动画时间
-        };
-
         let scene, camera, renderer, particles;
-        let geometry, material;
-        let state = 'idle'; // idle, counting, waiting, exploded
-        let clock = new THREE.Clock();
-        
-        // 交互变量
-        let targetRotationX = 0;
-        let targetRotationY = 0;
-        let mouseX = 0, mouseY = 0;
-        let windowHalfX = window.innerWidth / 2;
-        let windowHalfY = window.innerHeight / 2;
+        let photoGroup = new THREE.Group();
+        let photos = [];
+        let state = 'idle'; 
+        let glowTexture;
+        let raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 
         function init() {
+            // 场景
             scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.0005);
+            scene.fog = new THREE.FogExp2(0x000000, 0.0008);
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 10000);
-            camera.position.z = 1200;
+            // 摄像机
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 5000);
+            camera.position.z = 1000;
 
+            // 渲染器
             renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
-            createParticleSystem();
+            // 材质与资源
+            glowTexture = createGlowTexture();
+            loadPhotos();
+            createParticleSystem(); // 创建初始粒子云
 
-            // 事件监听
+            // 事件
             window.addEventListener('resize', onResize);
-            document.addEventListener('mousemove', onDocumentMouseMove);
-            document.addEventListener('touchstart', onDocumentTouchStart, { passive: false });
-            document.addEventListener('touchmove', onDocumentTouchMove, { passive: false });
+            startBtn.onclick = startSequence;
             document.addEventListener('click', onClick);
+            document.addEventListener('touchstart', onTouchStart, {passive: false});
+            document.addEventListener('touchmove', onTouchMove, {passive: false});
 
             animate();
         }
 
-        // --- 1. 创建流光粒子 ---
+        // --- 1. 粒子系统 ---
         function createParticleSystem() {
-            geometry = new THREE.BufferGeometry();
+            const geometry = new THREE.BufferGeometry();
             const positions = [];
             const colors = [];
             const sizes = [];
             const colorObj = new THREE.Color();
 
             for(let i=0; i<CONFIG.particleCount; i++) {
-                // 初始形态：银河旋涡
-                const r = Math.random() * 2000;
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.acos(2 * Math.random() - 1);
-
-                positions.push(
-                    r * Math.sin(phi) * Math.cos(theta),
-                    r * Math.sin(phi) * Math.sin(theta),
-                    r * Math.cos(phi)
-                );
+                // 初始状态：全屏随机分布 (星空)
+                const x = (Math.random() - 0.5) * 3000;
+                const y = (Math.random() - 0.5) * 3000;
+                const z = (Math.random() - 0.5) * 3000;
+                positions.push(x, y, z);
 
                 colorObj.setHex(CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)]);
                 colors.push(colorObj.r, colorObj.g, colorObj.b);
-                sizes.push(CONFIG.particleSize * (Math.random()*1.5 + 0.5));
+                sizes.push(CONFIG.particleSize * (0.5 + Math.random()));
             }
 
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('customColor', new THREE.Float32BufferAttribute(colors, 3));
             geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
 
-            // 程序生成辉光纹理
-            const glowTexture = createGlowTexture();
-
-            material = new THREE.ShaderMaterial({
+            const material = new THREE.ShaderMaterial({
                 uniforms: {
-                    pointTexture: { value: glowTexture },
-                    time: { value: 0 }
+                    pointTexture: { value: glowTexture }
                 },
                 vertexShader: `
-                    attribute float size;
-                    attribute vec3 customColor;
-                    varying vec3 vColor;
-                    uniform float time;
+                    attribute float size; attribute vec3 customColor; varying vec3 vColor;
                     void main() {
                         vColor = customColor;
-                        vec3 pos = position;
-                        // 粒子微动呼吸
-                        float breathe = 1.0 + sin(time * 3.0 + pos.x * 0.01) * 0.3;
-                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-                        gl_PointSize = size * breathe * (800.0 / -mvPosition.z);
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = size * (800.0 / -mvPosition.z);
                         gl_Position = projectionMatrix * mvPosition;
                     }
                 `,
                 fragmentShader: `
-                    uniform sampler2D pointTexture;
-                    varying vec3 vColor;
+                    uniform sampler2D pointTexture; varying vec3 vColor;
                     void main() {
                         vec4 tex = texture2D(pointTexture, gl_PointCoord);
-                        // 亮度叠加，模拟过曝
-                        gl_FragColor = vec4(vColor * 2.5, 1.0) * tex;
-                        if (gl_FragColor.a < 0.05) discard;
+                        gl_FragColor = vec4(vColor, 1.0) * tex;
+                        if(gl_FragColor.a < 0.1) discard;
                     }
                 `,
                 blending: THREE.AdditiveBlending,
                 depthTest: false,
-                depthWrite: false, // 解决遮挡黑边
                 transparent: true
             });
 
@@ -183,82 +161,70 @@
             scene.add(particles);
         }
 
-        function createGlowTexture() {
-            const canvas = document.createElement('canvas'); canvas.width=64; canvas.height=64;
-            const ctx = canvas.getContext('2d');
-            const g = ctx.createRadialGradient(32,32,0, 32,32,32);
-            g.addColorStop(0, 'rgba(255, 255, 255, 1)'); 
-            g.addColorStop(0.2, 'rgba(255, 200, 100, 0.8)');
-            g.addColorStop(0.5, 'rgba(255, 100, 0, 0.3)');
-            g.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-            return new THREE.CanvasTexture(canvas);
-        }
-
-        // --- 2. 变形逻辑 (文字/数字 -> 粒子) ---
+        // --- 2. 变形逻辑 (核心修复) ---
         function getPointsFromText(text, fontSize) {
-            const c = document.createElement('canvas');
-            const w=2048, h=1024; // 巨大画布保证清晰度
-            c.width=w; c.height=h;
-            const ctx = c.getContext('2d');
+            const canvas = document.createElement('canvas');
+            const w = 1024; const h = 512; // 固定画布大小，保证兼容性
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            
             ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
-            ctx.fillStyle = '#fff'; ctx.font = `900 ${fontSize}px "Microsoft YaHei", sans-serif`;
+            ctx.fillStyle = '#fff'; 
+            ctx.font = `900 ${fontSize}px Arial`; // 使用系统通用粗体
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             
             const lines = text.toString().split('\n');
-            const lineHeight = fontSize * 1.3;
+            const lh = fontSize * 1.2;
             lines.forEach((l, i) => {
-                ctx.fillText(l, w/2, h/2 - ((lines.length-1)*lineHeight)/2 + i*lineHeight);
+                ctx.fillText(l, w/2, h/2 - ((lines.length-1)*lh)/2 + i*lh);
             });
 
             const data = ctx.getImageData(0,0,w,h).data;
-            const pts = [];
-            const step = 6; // 采样步长
+            const targetPoints = [];
+            const step = 4; // 采样精度
             
             for(let y=0; y<h; y+=step) {
                 for(let x=0; x<w; x+=step) {
-                    if(data[(y*w+x)*4] > 128) {
-                        pts.push({
-                            x: (x - w/2) * 2, // 坐标缩放
-                            y: -(y - h/2) * 2,
+                    if(data[(y*w+x)*4] > 128) { // 如果是白色像素
+                        targetPoints.push({
+                            x: (x - w/2) * 3, // 坐标放大系数
+                            y: -(y - h/2) * 3,
                             z: 0
                         });
                     }
                 }
             }
-            return pts;
+            return targetPoints;
         }
 
-        function morphTo(targetPoints, duration) {
+        function morphTo(shapePoints, duration) {
             const pos = particles.geometry.attributes.position.array;
             
             for(let i=0; i<CONFIG.particleCount; i++) {
                 let tx, ty, tz;
-                
-                if(i < targetPoints.length) {
-                    tx = targetPoints[i].x;
-                    ty = targetPoints[i].y;
-                    tz = targetPoints[i].z;
+                if(i < shapePoints.length) {
+                    // 粒子变身：飞向文字位置
+                    tx = shapePoints[i].x;
+                    ty = shapePoints[i].y;
+                    tz = shapePoints[i].z;
                 } else {
-                    // 多余粒子做背景氛围
-                    const angle = Math.random() * Math.PI * 2;
-                    const r = 1200 + Math.random() * 800;
-                    tx = Math.cos(angle) * r;
-                    ty = Math.sin(angle) * r;
-                    tz = (Math.random() - 0.5) * 1000;
+                    // 多余粒子：随机飞散做背景
+                    const r = 1000 + Math.random()*1000;
+                    const theta = Math.random()*Math.PI*2;
+                    tx = r * Math.cos(theta);
+                    ty = r * Math.sin(theta);
+                    tz = (Math.random()-0.5)*500;
                 }
 
-                // 加点随机噪点，让它看起来像火焰在燃烧
-                tx += (Math.random()-0.5) * 5;
-                ty += (Math.random()-0.5) * 5;
+                // 添加一点随机抖动
+                tx += (Math.random()-0.5)*10;
+                ty += (Math.random()-0.5)*10;
 
                 new TWEEN.Tween({x:pos[i*3], y:pos[i*3+1], z:pos[i*3+2]})
                     .to({x:tx, y:ty, z:tz}, duration)
                     .easing(TWEEN.Easing.Exponential.InOut)
-                    .onUpdate((o) => {
-                        pos[i*3] = o.x;
-                        pos[i*3+1] = o.y;
-                        pos[i*3+2] = o.z;
+                    .onUpdate((o)=>{ 
+                        pos[i*3]=o.x; pos[i*3+1]=o.y; pos[i*3+2]=o.z; 
                     })
                     .start();
             }
@@ -268,137 +234,189 @@
         function startSequence() {
             document.getElementById('ui').style.display = 'none';
             state = 'counting';
-            
-            // 摄像机稍微推进
-            new TWEEN.Tween(camera.position).to({z: 1600}, 2000).start();
-            
+            // 摄像机推进
+            new TWEEN.Tween(camera.position).to({z: 1400}, 2000).start();
             runCountdown(5);
         }
 
-        function runCountdown(num) {
-            if(num < 1) {
+        function runCountdown(n) {
+            if(n < 1) {
                 showFinalText();
                 return;
             }
-            // 倒计时数字，字号 500
-            morphTo(getPointsFromText(num, 500), 800);
-            
-            setTimeout(() => {
-                runCountdown(num-1);
-            }, 1000);
+            // 显示数字，持续0.8秒
+            morphTo(getPointsFromText(n, 300), 800);
+            setTimeout(() => runCountdown(n-1), 1000);
         }
 
         function showFinalText() {
-            // 显示名字和祝福，字号 180
-            morphTo(getPointsFromText(CONFIG.text, 180), 2000);
+            // 显示文字
+            morphTo(getPointsFromText(CONFIG.text, 120), 1500);
             
-            // 进入等待点击状态
+            // 2秒后提示点击
             setTimeout(() => {
                 state = 'waiting';
-                tipDiv.innerText = "✨ 点击屏幕 · 开启 2026 ✨";
-                tipDiv.style.opacity = 1;
-                tipDiv.style.textShadow = "0 0 20px #fff";
-            }, 2500);
+                const tip = document.getElementById('tip');
+                tip.innerText = "✨ 点击屏幕 · 开启 2026 ✨";
+                tip.style.opacity = 1;
+            }, 2000);
         }
 
-        function onClick() {
-            // 只有在等待状态点击才有效
-            if(state === 'waiting') {
-                explode();
-            }
-        }
+        // --- 4. 爆炸 & 显现照片 (视频效果核心) ---
+        function explodeAndShowPhotos() {
+            state = 'photos';
+            document.getElementById('tip').style.opacity = 0;
 
-        // --- 4. 炸裂逻辑 ---
-        function explode() {
-            state = 'exploded';
-            tipDiv.style.opacity = 0;
-            
+            // 1. 粒子炸开 (星空背景)
             const pos = particles.geometry.attributes.position.array;
-            
-            // 爆炸动画
             for(let i=0; i<CONFIG.particleCount; i++) {
-                // 球形爆炸算法
-                const r = 2000 + Math.random() * 4000;
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.acos(2 * Math.random() - 1);
+                const r = 2000 + Math.random()*2000;
+                const theta = Math.random()*Math.PI*2;
+                const phi = Math.acos(2*Math.random()-1);
                 
-                const tx = r * Math.sin(phi) * Math.cos(theta);
-                const ty = r * Math.sin(phi) * Math.sin(theta);
-                const tz = r * Math.cos(phi);
-
                 new TWEEN.Tween({x:pos[i*3], y:pos[i*3+1], z:pos[i*3+2]})
-                    .to({x:tx, y:ty, z:tz}, 3000)
+                    .to({x:r*Math.sin(phi)*Math.cos(theta), y:r*Math.sin(phi)*Math.sin(theta), z:r*Math.cos(phi)}, 2000)
                     .easing(TWEEN.Easing.Exponential.Out)
-                    .onUpdate((o) => {
-                        pos[i*3] = o.x;
-                        pos[i*3+1] = o.y;
-                        pos[i*3+2] = o.z;
-                    })
+                    .onUpdate((o)=>{ pos[i*3]=o.x; pos[i*3+1]=o.y; pos[i*3+2]=o.z; })
                     .start();
             }
 
-            // 爆炸后显示提示
+            // 2. 照片螺旋升起 (视频里的照片树)
             setTimeout(() => {
-                tipDiv.innerText = "滑动屏幕 · 漫游星河";
-                tipDiv.style.opacity = 1;
-            }, 3000);
+                createPhotoHelix();
+                document.getElementById('tip').innerText = "拖动旋转 · 点击放大";
+                document.getElementById('tip').style.opacity = 1;
+            }, 500);
         }
 
-        // --- 5. 手势/鼠标交互 (旋转视角) ---
-        function onDocumentMouseMove(event) {
-            mouseX = event.clientX - windowHalfX;
-            mouseY = event.clientY - windowHalfY;
-        }
+        function createPhotoHelix() {
+            scene.add(photoGroup);
+            const radius = 350; // 螺旋半径
+            const yStep = 40;   // 垂直间距
 
-        function onDocumentTouchStart(event) {
-            if (event.touches.length === 1) {
-                // event.preventDefault(); // 允许点击
-                mouseX = event.touches[0].pageX - windowHalfX;
-                mouseY = event.touches[0].pageY - windowHalfY;
-            }
-        }
-
-        function onDocumentTouchMove(event) {
-            if (event.touches.length === 1) {
-                event.preventDefault();
-                mouseX = event.touches[0].pageX - windowHalfX;
-                mouseY = event.touches[0].pageY - windowHalfY;
-            }
-        }
-
-        function onResize() {
-            windowHalfX = window.innerWidth / 2;
-            windowHalfY = window.innerHeight / 2;
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            TWEEN.update();
-
-            const time = clock.getElapsedTime();
-            if(particles) particles.material.uniforms.time.value = time;
-
-            // 摄像机根据鼠标/手势位置平滑移动 (视差效果)
-            if(state !== 'idle') {
-                targetRotationX = mouseX * 0.0005;
-                targetRotationY = mouseY * 0.0005;
+            photos.forEach((tex, i) => {
+                // 照片比例修正
+                let w=100, h=100;
+                if(tex.image) h = w / (tex.image.width / tex.image.height);
                 
-                // 缓动旋转粒子群
-                particles.rotation.y += 0.05 * (targetRotationX - particles.rotation.y);
-                particles.rotation.x += 0.05 * (targetRotationY - particles.rotation.x);
+                const geo = new THREE.PlaneGeometry(w, h);
+                const mat = new THREE.MeshBasicMaterial({ 
+                    map: tex, side: THREE.DoubleSide, 
+                    transparent: true, opacity: 0 
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+
+                // 螺旋排列
+                const theta = i * 0.6 + Math.PI;
+                const y = -(CONFIG.photoCount * yStep)/2 + i * yStep;
+                
+                mesh.position.set(radius * Math.cos(theta), y, radius * Math.sin(theta));
+                mesh.lookAt(0, y, 0); // 面向中心轴
+
+                mesh.userData = { 
+                    originalPos: mesh.position.clone(), 
+                    originalRot: mesh.rotation.clone(), 
+                    isZoomed: false 
+                };
+
+                // 淡入动画
+                new TWEEN.Tween(mat).to({opacity: 1}, 1500).delay(i*100).start();
+                photoGroup.add(mesh);
+            });
+        }
+
+        // --- 辅助功能 ---
+        function createGlowTexture() {
+            const c = document.createElement('canvas'); c.width=64; c.height=64;
+            const ctx = c.getContext('2d');
+            const g = ctx.createRadialGradient(32,32,0,32,32,32);
+            g.addColorStop(0, 'rgba(255,255,255,1)');
+            g.addColorStop(0.2, 'rgba(255,200,50,0.8)');
+            g.addColorStop(0.5, 'rgba(255,100,0,0.2)');
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+            return new THREE.CanvasTexture(c);
+        }
+
+        function loadPhotos() {
+            const loader = new THREE.TextureLoader();
+            for(let i=1; i<=CONFIG.photoCount; i++) {
+                loader.load(CONFIG.photoPath + i + CONFIG.photoExt, 
+                    (tex) => photos.push(tex), 
+                    undefined, 
+                    () => {
+                        // 缺图处理：创建一个发光块代替
+                        const c=document.createElement('canvas');c.width=64;c.height=64;
+                        const x=c.getContext('2d');x.fillStyle='#333';x.fillRect(0,0,64,64);
+                        photos.push(new THREE.CanvasTexture(c));
+                    }
+                );
+            }
+        }
+
+        // --- 交互逻辑 ---
+        let isDragging = false, preX = 0, preY = 0;
+        let zoomedItem = null;
+
+        function onClick(e) {
+            // 1. 等待爆炸时点击
+            if(state === 'waiting') {
+                explodeAndShowPhotos();
+                return;
             }
 
-            // 炸开后自动缓慢自转
-            if(state === 'exploded') {
-                particles.rotation.y += 0.001;
-            }
+            // 2. 照片墙状态点击
+            if(state === 'photos' && !isDragging) {
+                mouse.x = (e.clientX/window.innerWidth)*2-1;
+                mouse.y = -(e.clientY/window.innerHeight)*2+1;
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(photoGroup.children);
 
+                if(intersects.length > 0) {
+                    const obj = intersects[0].object;
+                    if(zoomedItem && zoomedItem !== obj) resetZoom(zoomedItem);
+                    if(obj.userData.isZoomed) { resetZoom(obj); zoomedItem=null; }
+                    else { zoomPhoto(obj); zoomedItem=obj; }
+                } else if(zoomedItem) {
+                    resetZoom(zoomedItem); zoomedItem=null;
+                }
+            }
+        }
+
+        function zoomPhoto(mesh) {
+            mesh.userData.isZoomed = true;
+            const t = camera.position.clone().setLength(200); // 飞到眼前
+            new TWEEN.Tween(mesh.position).to(t, 1000).easing(TWEEN.Easing.Quintic.Out).start();
+            new TWEEN.Tween(mesh.rotation).to({x:camera.rotation.x, y:camera.rotation.y, z:camera.rotation.z}, 1000).start();
+            new TWEEN.Tween(mesh.scale).to({x:3, y:3, z:3}, 1000).start();
+        }
+
+        function resetZoom(mesh) {
+            mesh.userData.isZoomed = false;
+            new TWEEN.Tween(mesh.position).to(mesh.userData.originalPos, 1000).easing(TWEEN.Easing.Quintic.Out).start();
+            new TWEEN.Tween(mesh.rotation).to(mesh.userData.originalRot, 1000).start();
+            new TWEEN.Tween(mesh.scale).to({x:1, y:1, z:1}, 1000).start();
+        }
+
+        // 旋转交互
+        function onTouchStart(e) { if(e.touches.length===1){ isDragging=false; preX=e.touches[0].clientX; preY=e.touches[0].clientY; }}
+        function onTouchMove(e) {
+            if(state !== 'photos' || zoomedItem) return;
+            isDragging = true;
+            const dx = e.touches[0].clientX - preX;
+            const dy = e.touches[0].clientY - preY;
+            photoGroup.rotation.y += dx * 0.005;
+            photoGroup.rotation.x += dy * 0.005;
+            preX=e.touches[0].clientX; preY=e.touches[0].clientY;
+        }
+
+        function onResize() { camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+        function animate() {
+            requestAnimationFrame(animate); TWEEN.update();
+            if(particles) particles.geometry.attributes.position.needsUpdate = true;
+            if(state==='photos' && !zoomedItem && !isDragging) photoGroup.rotation.y += 0.001;
             renderer.render(scene, camera);
         }
-
     </script>
 </body>
 </html>
